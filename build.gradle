@@ -1,0 +1,113 @@
+// 프로젝트 빌드 과정에서 그래들이 사용할 플러그인을 설정합니다.
+plugins {
+    // 컴파일, 테스트, 패키징, 실행 등 Java 프로젝트 빌드에 필요한 태스크 제공
+    id 'java'
+
+    // 스프링부트의 의존성 관리 및 패키징, 자동설정, 실행 관련 태스크 제공
+    id 'org.springframework.boot' version '3.3.1'
+
+    // 스프링 의존성 관리 기능 제공
+    id 'io.spring.dependency-management' version '1.1.5'
+
+    // 다양한 언어를 위한 코드 포매터와 관련 태스크 제공(예: spotlessApply)
+    id 'com.diffplug.spotless' version '6.25.0'
+}
+
+// 프로젝트의 그룹 ID와 버전을 설정합니다.
+group = 'com.asdf'
+version = '0.0.1-dev'
+
+// Java 컴파일러와 관련된 설정을 추가합니다.
+java {
+    // Java 21 버전을 사용하도록 설정합니다.
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// 프로젝트의 의존성을 해결하기 위한 Maven 센트럴 저장소를 추가합니다.
+repositories {
+    mavenCentral()
+}
+
+// 프로젝트의 구현, 테스트, 런타임 의존성을 설정합니다.
+// 여기에서 필요한 의존성을 추가하면, 그래들이 자동으로
+// 의존성을 mavenCentral을 통해 다운로드합니다.
+dependencies {
+    // Spring Boot Web 스타터 의존성을 추가합니다.
+    // 웹 애플리케이션 개발에 필요한 기본적인 의존성을 제공합니다.
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Swagger UI를 사용하기 위한 의존성을 추가합니다.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
+
+    // Spring Data JPA 스타터 의존성을 추가합니다.
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // MySQL JDBC 드라이버 의존성을 추가합니다.
+    implementation 'mysql:mysql-connector-java:8.0.32'
+
+    // Spring Security와 JWT 의존성을 추가합니다.
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // JWT 라이브러리를 추가합니다.
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+
+    // Lombok 라이브러리를 컴파일 시에만 사용하도록 설정합니다.
+    // Getter, Setter 등을 자동으로 생성해줍니다.
+    compileOnly 'org.projectlombok:lombok'
+
+    // Lombok이 제공하는 기능을 사용하기 위한 어노테이션 프로세서를 추가합니다.
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // JUnit 5를 이용한 테스트를 위한 의존성을 추가합니다.
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+    // Spring Security 테스트를 위한 의존성을 추가합니다.
+    testImplementation 'org.springframework.security:spring-security-test'
+
+    // Import TestContainers for JUnit 5
+    // 임시 MySQL 컨테이너를 생성하여 유닛테스트를 수행하기 위한 의존성을 추가합니다.
+    testImplementation 'org.testcontainers:junit-jupiter:1.20.1'
+    testImplementation 'org.testcontainers:testcontainers:1.20.1'
+    testImplementation 'org.testcontainers:mysql:1.20.1'
+
+    // JUnit 5 테스트를 실행하기 위한 런타임 의존성을 추가합니다.
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // JWT 라이브러리의 구현체를 추가합니다.
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5'
+}
+
+// 테스트 태스크를 구성합니다.
+tasks.named('test') {
+    useJUnitPlatform()
+
+    // 테스트 실행 시 상세한 결과 출력 활성화
+    testLogging {
+        // 테스트 이벤트 중 어떤 것을 로그로 출력할지 설정
+        events "passed", "skipped", "failed"
+        // 테스트 케이스 별 결과를 항상 출력하도록 설정
+        outputs.upToDateWhen { false }
+        // Java Agent 경고 메시지 억제
+        jvmArgs '-XX:+EnableDynamicAgentLoading'
+    }
+}
+
+// Spotless 플러그인을 사용하여 코드 양식을 자동으로 맞춰줍니다.
+spotless {
+    // Java 파일에 대한 포맷팅 설정을 추가합니다.
+    java {
+        // Google Java Format 적용
+        googleJavaFormat('1.22.0').reflowLongStrings()
+    }
+}
+
+// build 할 때 spotlessApply를 실행하여 자동으로 코드의 양식을 맞춥니다.
+build.dependsOn 'spotlessApply'
+
+bootRun {
+    String activeProfile = System.properties['spring.profiles.active']
+    systemProperty "spring.profiles.active", activeProfile
+}
