@@ -31,6 +31,10 @@ public class FollowService {
       throw new IllegalArgumentException("자신을 팔로우할 수 없습니다.");
     }
 
+      if (followRepository.existsByFollowerIdAndFolloweeId(followerId, followeeId)) {
+          throw new IllegalStateException("이미 팔로우 중입니다.");
+      }
+
     User follower =
         userRepository
             .findById(followerId)
