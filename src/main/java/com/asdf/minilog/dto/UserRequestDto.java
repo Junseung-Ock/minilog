@@ -9,4 +9,5 @@ import lombok.NonNull;
 public class UserRequestDto {
   @NonNull private String username;
   @NonNull private String password;
+  @NonNull private String email;
 }

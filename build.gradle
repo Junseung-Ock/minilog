@@ -50,6 +50,8 @@ dependencies {
     // Spring Security와 JWT 의존성을 추가합니다.
     implementation 'org.springframework.boot:spring-boot-starter-security'
 
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+
     // JWT 라이브러리를 추가합니다.
     implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
 
