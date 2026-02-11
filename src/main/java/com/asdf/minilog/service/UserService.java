@@ -57,6 +57,7 @@ public class UserService {
             User.builder()
                 .username(userRequestDto.getUsername())
                 .password(userRequestDto.getPassword())
+                    .email(userRequestDto.getEmail())
                 .roles(roles)
                 .build());
     return EntityDtoMapper.toDto(savedUser);

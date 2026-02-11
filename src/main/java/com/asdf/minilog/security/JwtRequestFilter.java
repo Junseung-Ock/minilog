@@ -3,12 +3,14 @@ package com.asdf.minilog.security;
 import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -21,7 +23,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtRequestFilter extends OncePerRequestFilter {
   private static final Logger logger = LoggerFactory.getLogger(JwtRequestFilter.class);
 
-  @Autowired private UserDetailsService jwtUserDetailsService;
+  @Autowired @Lazy
+  private UserDetailsService jwtUserDetailsService;
 
   @Autowired private JwtUtil jwtTokenUtil;
 
@@ -34,19 +37,37 @@ public class JwtRequestFilter extends OncePerRequestFilter {
     String username = null;
     String jwt = null;
 
-    // Authorization 헤더에서 JWT를 꺼내서 username을 확인하고, 문제가 있으면 로그를 남기는 부분
-    if (requestTokenHeader != null && requestTokenHeader.startsWith("Bearer ")) {
-      jwt = requestTokenHeader.substring(7);
-      try {
-        username = jwtTokenUtil.getUsernameFromToken(jwt);
-      } catch (IllegalArgumentException e) {
-        logger.error("Unable to get JWT", e);
-      } catch (ExpiredJwtException e) {
-        logger.warn("JWT has expired", e);
+      // 1단계: 쿠키에서 JWT 추출 시도
+      Cookie[] cookies = request.getCookies();
+      if (cookies != null) {
+          for (Cookie cookie : cookies) {
+              if ("Authorization".equals(cookie.getName())) {
+                  jwt = cookie.getValue();
+                  break;
+              }
+          }
       }
-    } else {
-      logger.warn("JWT does not begin with Bearer String");
-    }
+
+      // 2단계: 쿠키에 토큰이 없다면 기존처럼 헤더에서 추출 시도
+      if (jwt == null && requestTokenHeader != null && requestTokenHeader.startsWith("Bearer ")) {
+          jwt = requestTokenHeader.substring(7);
+      }
+
+      // 3단계: 추출된 토큰이 있다면 username 확인
+      if (jwt != null) {
+          try {
+              username = jwtTokenUtil.getUsernameFromToken(jwt);
+          } catch (IllegalArgumentException e) {
+              logger.error("Unable to get JWT", e);
+          } catch (ExpiredJwtException e) {
+              logger.warn("JWT has expired", e);
+          } catch (Exception e) {
+              logger.error("JWT validation error", e);
+          }
+      } else {
+          // 로그인하지 않은 사용자가 접근할 때 발생하는 로그 (필요없으면 주석 처리 가능)
+          logger.debug("JWT Token is missing");
+      }
 
     // 토큰에서 username을 정상적으로 추출했고, 아직 현재 요청에 대해 인증(Authentication)이 설정되지 않은 경우에만 진행
     if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {

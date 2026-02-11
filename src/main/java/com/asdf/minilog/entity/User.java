@@ -33,6 +33,9 @@ public class User {
   @Column(nullable = false)
   private String password;
 
+  @Column(nullable = false)
+  private String email;
+
   @CreatedDate
   @Column(name = "created_at", nullable = false, updatable = false)
   private LocalDateTime createdAt;
@@ -66,6 +69,7 @@ public class User {
     private Long id;
     private String username;
     private String password;
+    private String email;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Set<Role> roles;
@@ -84,6 +88,11 @@ public class User {
 
     public UserBuilder password(String password) {
       this.password = passwordEncoder.encode(password);
+      return this;
+    }
+
+    public UserBuilder email(String email) {
+      this.email = email;
       return this;
     }
 
@@ -112,6 +121,7 @@ public class User {
       user.id = this.id;
       user.username = this.username;
       user.password = this.password;
+      user.email = this.email;
       user.createdAt = this.createdAt;
       user.updatedAt = this.updatedAt;
       user.roles = this.roles;
