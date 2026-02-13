@@ -3,9 +3,12 @@ package com.asdf.minilog.controller;
 import com.asdf.minilog.dto.AuthenticationRequestDto;
 import com.asdf.minilog.dto.AuthenticationResponseDto;
 import com.asdf.minilog.dto.UserResponseDto;
+import com.asdf.minilog.entity.User;
 import com.asdf.minilog.security.JwtUtil;
+import com.asdf.minilog.service.RefreshTokenService;
 import com.asdf.minilog.service.UserService;
 import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,73 +31,124 @@ public class AuthenticationController {
   private JwtUtil jwtTokenUtil;
   private UserDetailsService userDetailsService;
   private UserService userService;
+  private RefreshTokenService refreshTokenService;
 
   @Autowired
   public AuthenticationController(
       AuthenticationManager authenticationManager,
       JwtUtil jwtTokenUtil,
       UserDetailsService userDetailsService,
-      UserService userService) {
+      UserService userService,
+      RefreshTokenService refreshTokenService) {
     this.authenticationManager = authenticationManager;
     this.jwtTokenUtil = jwtTokenUtil;
     this.userDetailsService = userDetailsService;
     this.userService = userService;
+    this.refreshTokenService = refreshTokenService;
   }
 
     @PostMapping("/login")
     public ResponseEntity<?> createAuthenticationToken(
             @RequestBody AuthenticationRequestDto authRequest,
-            HttpServletResponse response) { // HttpServletResponse 추가
+            HttpServletResponse response) {
         try {
-            // 1. 비밀번호 검증 (실패 시 BadCredentialsException 발생)
             authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(
-                            authRequest.getUsername(), authRequest.getPassword()));
+                    new UsernamePasswordAuthenticationToken(authRequest.getUsername(), authRequest.getPassword()));
 
-            // 2. 유저 정보 로드
             UserDetails userDetails = userDetailsService.loadUserByUsername(authRequest.getUsername());
             UserResponseDto userResponseDto = userService.getUserByUsername(userDetails.getUsername());
 
-            // 3. JWT 토큰 생성
-            String jwt = jwtTokenUtil.generateToken(userDetails, userResponseDto.getId());
-
-            // 4. 쿠키 생성 및 설정 (OAuth2SuccessHandler와 설정을 동일하게 맞춤)
-            Cookie authCookie = new Cookie("Authorization", jwt);
-            authCookie.setPath("/");
-            authCookie.setHttpOnly(true); // JS 접근 방지
-            authCookie.setMaxAge(60 * 60 * 24); // 1일 유지
-            // authCookie.setSecure(true); // 배포 환경(HTTPS)에서 활성화
-
-            // 5. 응답에 쿠키 추가
+            // 1. Access Token 생성 및 쿠키 설정 (30분)
+            String accessToken = jwtTokenUtil.generateAccessToken(userDetails, userResponseDto.getId());
+            Cookie authCookie = new Cookie("Authorization", accessToken);
+            authCookie.setPath("/"); // 모든 요청에 쿠키를 함께 전송
+            authCookie.setHttpOnly(true);
+            authCookie.setMaxAge(30 * 60); // 30분
             response.addCookie(authCookie);
 
-            // 6. 바디에는 토큰 대신 유저 정보를 반환 (프론트엔드 편의성)
+            // 2. Refresh Token 생성 및 DB 저장 (7일)
+            String refreshTokenString = jwtTokenUtil.generateRefreshToken(userDetails);
+            refreshTokenService.createOrUpdateRefreshToken(userResponseDto.getId(), refreshTokenString);
+
+            // 3. Refresh Token 쿠키 설정
+            Cookie refreshCookie = new Cookie("RefreshToken", refreshTokenString);
+            refreshCookie.setPath("/api/v2/auth/refresh"); // 중요: 재발급 경로에서만 전송되도록 제한
+            refreshCookie.setHttpOnly(true);
+            refreshCookie.setMaxAge(7 * 24 * 60 * 60); // 7일
+            response.addCookie(refreshCookie);
+
             return ResponseEntity.ok(userResponseDto);
 
         } catch (BadCredentialsException e) {
-            logger.error("Authentication failed: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid credentials.");
-        } catch (Exception e) {
-            logger.error("Internal error during login: ", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("An error occurred during authentication.");
         }
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<?> logout(HttpServletResponse response) {
-        // 1. 만료 시간이 0인 쿠키를 생성 (기존 쿠키와 이름, 경로가 같아야 함)
-        Cookie cookie = new Cookie("Authorization", null);
-        cookie.setPath("/");
-        cookie.setHttpOnly(true);
-        cookie.setMaxAge(0); // 즉시 삭제 명령
+    public ResponseEntity<?> logout(HttpServletResponse response, @RequestParam(required = false) Long userId) {
+        // 1. DB에서 리프레시 토큰 삭제
+        if (userId != null) {
+            refreshTokenService.deleteByUserId(userId);
+        }
 
-        // 배포 환경이 HTTPS라면 추가 (로컬 개발 시엔 일단 주석 처리해도 됨)
-        // cookie.setSecure(true);
+        // 2. 쿠키 삭제 (Authorization & RefreshToken 둘 다)
+        Cookie authCookie = new Cookie("Authorization", null);
+        authCookie.setPath("/");
+        authCookie.setMaxAge(0);
+        response.addCookie(authCookie);
 
-        // 2. 응답 헤더에 쿠키 추가
-        response.addCookie(cookie);
+        Cookie refreshCookie = new Cookie("RefreshToken", null);
+        refreshCookie.setPath("/api/v2/auth/refresh");
+        refreshCookie.setMaxAge(0);
+        response.addCookie(refreshCookie);
 
         return ResponseEntity.ok().body("Successfully logged out.");
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshAccessToken(HttpServletRequest request, HttpServletResponse response) {
+        // 1. 쿠키에서 RefreshToken 추출
+        Cookie[] cookies = request.getCookies();
+        String refreshTokenString = null;
+
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (cookie.getName().equals("RefreshToken")) {
+                    refreshTokenString = cookie.getValue();
+                    break;
+                }
+            }
+        }
+
+        if (refreshTokenString == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("리프레시 토큰이 없습니다. 다시 로그인하세요.");
+        }
+
+        // 2. DB 검증 및 새로운 액세스 토큰 생성
+        try {
+            return refreshTokenService.findByToken(refreshTokenString)
+                    .map(refreshTokenService::verifyExpiration) // 만료 시간 체크 (DB상)
+                    .map(refreshToken -> {
+                        User user = refreshToken.getUser();
+                        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
+
+                        // 새 액세스 토큰 생성
+                        String newAccessToken = jwtTokenUtil.generateAccessToken(userDetails, user.getId());
+
+                        // 3. 새 액세스 토큰을 쿠키에 저장
+                        Cookie authCookie = new Cookie("Authorization", newAccessToken);
+                        authCookie.setPath("/");
+                        authCookie.setHttpOnly(true);
+                        authCookie.setMaxAge(30 * 60); // 30분
+                        // authCookie.setSecure(true); // 배포 시 활성화
+                        response.addCookie(authCookie);
+
+                        return ResponseEntity.ok("토큰 재발급 성공");
+                    })
+                    .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("유효하지 않은 리프레시 토큰입니다."));
+
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(e.getMessage());
+        }
     }
 }

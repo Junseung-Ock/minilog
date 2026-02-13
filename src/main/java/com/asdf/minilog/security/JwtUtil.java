@@ -10,72 +10,96 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 @Component
 public class JwtUtil implements Serializable {
-  private static final long serialVersionUID = -2550185165626007488L;
-  public static final long JWT_VALIDITY = 5 * 60 * 60;
+    private static final long serialVersionUID = -2550185165626007488L;
 
-  @Value("${jwt.secret}")
-  private String secret;
+    // 만료 시간 설정
+    public static final long ACCESS_TOKEN_VALIDITY = 30 * 60; // 30분
+    public static final long REFRESH_TOKEN_VALIDITY = 7 * 24 * 60 * 60; // 7일
 
-  public String getUsernameFromToken(String token) {
-    return getClaimFromToken(token, Claims::getSubject);
-  }
+    @Value("${jwt.secret}")
+    private String secret;
 
-  public Long getUserIdFromToken(String token) {
-    String jwt;
-    if (token.startsWith("Bearer ")) {
-      jwt = token.substring(7);
-    } else {
-      jwt = token;
+    // secret을 암호화 알고리즘에 맞게 가공해서
+    // 실제로 사용할 수 있는 열쇠(Key)로 만드는 과정
+    private Key getSigningKey() {
+        byte[] keyBytes = Base64.getDecoder().decode(secret);
+        return new SecretKeySpec(keyBytes, SignatureAlgorithm.HS256.getJcaName());
     }
 
-    return getClaimFromToken(jwt, claims -> claims.get("userId", Long.class));
-  }
+    public String getUsernameFromToken(String token) {
+        return getClaimFromToken(token, Claims::getSubject);
+    }
 
-  public Date getExpirationDateFromToken(String token) {
-    return getClaimFromToken(token, Claims::getExpiration);
-  }
+    public Long getUserIdFromToken(String token) {
+        return getClaimFromToken(token, claims -> claims.get("userId", Long.class));
+    }
 
-  private <T> T getClaimFromToken(String token, Function<Claims, T> claimsResolver) {
-    Claims claims = getAllClaimsFromToken(token);
-    return claimsResolver.apply(claims);
-  }
+    public Date getExpirationDateFromToken(String token) {
+        return getClaimFromToken(token, Claims::getExpiration);
+    }
 
-  private Claims getAllClaimsFromToken(String token) {
-    Key signingKey =
-        new SecretKeySpec(
-            Base64.getDecoder().decode(secret), SignatureAlgorithm.HS256.getJcaName());
-    return Jwts.parserBuilder().setSigningKey(signingKey).build().parseClaimsJws(token).getBody();
-  }
+    private <T> T getClaimFromToken(String token, Function<Claims, T> claimsResolver) {
+        final Claims claims = getAllClaimsFromToken(token);
+        return claimsResolver.apply(claims);
+    }
 
-  private Boolean isTokenExpired(String token) {
-    Date expiration = getExpirationDateFromToken(token);
-    return expiration.before(new Date());
-  }
+    private Claims getAllClaimsFromToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+    }
 
-  public String generateToken(UserDetails userDetails, Long userId) {
-    Map<String, Object> claims = new HashMap<>();
-    claims.put("userId", userId);
+    public Boolean isTokenExpired(String token) {
+        final Date expiration = getExpirationDateFromToken(token);
+        return expiration.before(new Date());
+    }
 
-    return Jwts.builder()
-        .setClaims(claims)
-        .setSubject(userDetails.getUsername())
-        .setIssuedAt(new Date(System.currentTimeMillis()))
-        .setExpiration(new Date(System.currentTimeMillis() + JWT_VALIDITY * 1000))
-        .signWith(
-            new SecretKeySpec(
-                Base64.getDecoder().decode(secret), SignatureAlgorithm.HS256.getJcaName()))
-        .compact();
-  }
+    /**
+     * 액세스 토큰 생성 (역할 정보 포함)
+     */
+    public String generateAccessToken(UserDetails userDetails, Long userId) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
 
-  public Boolean validateToken(String token, UserDetails userDetails) {
-    String username = getUsernameFromToken(token);
-    return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
-  }
+        // 역할(Role) 정보 추가
+        String roles = userDetails.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.joining(","));
+        claims.put("roles", roles);
+
+        return createToken(claims, userDetails.getUsername(), ACCESS_TOKEN_VALIDITY);
+    }
+
+    /**
+     * 리프레시 토큰 생성 (최소한의 정보만 포함)
+     */
+    public String generateRefreshToken(UserDetails userDetails) {
+        return createToken(new HashMap<>(), userDetails.getUsername(), REFRESH_TOKEN_VALIDITY);
+    }
+
+    private String createToken(Map<String, Object> claims, String subject, long validity) {
+        return Jwts.builder()
+                .setClaims(claims)
+                .setSubject(subject)
+                .setIssuedAt(new Date(System.currentTimeMillis()))
+                .setExpiration(new Date(System.currentTimeMillis() + validity * 1000))
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public Boolean validateToken(String token, UserDetails userDetails) {
+        final String username = getUsernameFromToken(token);
+        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+    }
 }
