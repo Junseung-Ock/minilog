@@ -54,8 +54,8 @@ public class SecurityConfig {
     return authenticationConfiguration.getAuthenticationManager();
   }
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
+  @Bean
+  public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
@@ -71,6 +71,7 @@ public class SecurityConfig {
                               requests
                                       .requestMatchers(
                                               "/api/v2/auth/login",
+                                              "/api/v2/auth/refresh",
                                               "/swagger-ui/**",
                                               "/v3/api-docs/**",
                                               "/login/oauth2/**",
